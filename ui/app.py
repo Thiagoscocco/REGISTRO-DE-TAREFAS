@@ -7,7 +7,7 @@ from engine.cronometro import Cronometro, formatar_tempo
 
 class App:
     def __init__(self):
-        st.set_page_config(page_title="Cronometro de Atividades", layout="centered")
+        st.set_page_config(page_title="Cronometro de Atividades (pênis)", layout="centered")
 
         if "cronometro" not in st.session_state:
             st.session_state.cronometro = Cronometro()
