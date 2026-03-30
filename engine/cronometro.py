@@ -31,6 +31,9 @@ class Cronometro:
             # evita contar o tempo pausado no proximo intervalo
             self._ultimo_checkpoint = self._inicio
 
+    def rodando(self):
+        return self._rodando
+
     def concluir(self):
         self.resetar()
 
