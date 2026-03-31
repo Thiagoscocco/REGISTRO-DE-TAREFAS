@@ -1,6 +1,7 @@
 import time
 from datetime import date, datetime, timedelta
 
+import plotly.express as px
 import streamlit as st
 
 from engine.cronometro import Cronometro, formatar_tempo
@@ -18,16 +19,16 @@ def parse_duracao_hhmmss(texto):
         minutos = int(partes[1])
         segundos = int(partes[2])
     except ValueError as exc:
-        raise ValueError("Duracao invalida. Use apenas numeros em HH:MM:SS.") from exc
+        raise ValueError("Duração inválida. Use apenas números em HH:MM:SS.") from exc
 
     if horas < 0 or minutos < 0 or segundos < 0:
-        raise ValueError("Duracao nao pode ser negativa.")
+        raise ValueError("Duração não pode ser negativa.")
     if minutos > 59 or segundos > 59:
         raise ValueError("Minutos e segundos devem ficar entre 0 e 59.")
 
     total = horas * 3600 + minutos * 60 + segundos
     if total <= 0:
-        raise ValueError("Duracao precisa ser maior que zero.")
+        raise ValueError("Duração precisa ser maior que zero.")
     return float(total)
 
 
@@ -355,6 +356,48 @@ class App:
                 tarefas_total.extend(self.repo.listar_tarefas_da_divisao(divisao["id"]))
         return self._resumo_periodos_tarefas(tarefas_total)
 
+    def _valor_por_periodo(self, total, semana, hoje_total, periodo):
+        if periodo == "Tempo semanal":
+            return semana
+        if periodo == "Tempo hoje":
+            return hoje_total
+        return total
+
+    def _dados_estatistica_objetivos(self, objetivos, divisoes, periodo):
+        dados = []
+        for objetivo in objetivos:
+            total, semana, hoje_total = self._resumo_periodos_objetivo(
+                objetivo["id"], divisoes
+            )
+            valor = self._valor_por_periodo(total, semana, hoje_total, periodo)
+            if valor > 0:
+                dados.append({"nome": objetivo["nome"], "valor": valor})
+        return dados
+
+    def _dados_estatistica_divisoes(self, divisoes, periodo):
+        dados = []
+        for divisao in divisoes:
+            total, semana, hoje_total = self._resumo_periodos_divisao(divisao["id"])
+            valor = self._valor_por_periodo(total, semana, hoje_total, periodo)
+            if valor > 0:
+                dados.append({"nome": self._label_divisao(divisao), "valor": valor})
+        return dados
+
+    def _render_grafico_pizza(self, titulo, dados):
+        if not dados:
+            st.info("Sem dados para este periodo.")
+            return
+
+        fig = px.pie(
+            values=[item["valor"] for item in dados],
+            names=[item["nome"] for item in dados],
+            title=titulo,
+            hole=0.4,
+        )
+        fig.update_traces(textposition="inside", textinfo="percent+label")
+        fig.update_layout(margin=dict(l=10, r=10, t=60, b=10))
+        st.plotly_chart(fig, use_container_width=True)
+
     def _render_aba_registros(self, objetivos, divisoes):
         st.subheader("Registros")
 
@@ -385,6 +428,24 @@ class App:
             col1.metric("Horas Totais", formatar_tempo(total))
             col2.metric("Horas na semana", formatar_tempo(semana))
             col3.metric("Horas hoje", formatar_tempo(hoje_total))
+
+    def _render_aba_estatisticas(self, objetivos, divisoes):
+        st.subheader("Estatisticas")
+
+        periodo = st.selectbox(
+            "Periodo",
+            options=["Tempo total", "Tempo semanal", "Tempo hoje"],
+            index=0,
+            key="estatisticas_periodo",
+        )
+
+        st.markdown("### Objetivos")
+        dados_objetivos = self._dados_estatistica_objetivos(objetivos, divisoes, periodo)
+        self._render_grafico_pizza(f"Objetivos - {periodo}", dados_objetivos)
+
+        st.markdown("### Divisoes de Trabalho")
+        dados_divisoes = self._dados_estatistica_divisoes(divisoes, periodo)
+        self._render_grafico_pizza(f"Divisoes de Trabalho - {periodo}", dados_divisoes)
 
     def _render_aba_configuracoes(self, divisoes):
         st.subheader("Configuracoes")
@@ -458,10 +519,18 @@ class App:
                 "Objetivos",
                 "Divisoes de Trabalho",
                 "Registros",
+                "Estatisticas",
                 "Configuracoes",
             ]
         )
-        aba_cronometro, aba_objetivos, aba_divisoes, aba_registros, aba_config = abas
+        (
+            aba_cronometro,
+            aba_objetivos,
+            aba_divisoes,
+            aba_registros,
+            aba_estatisticas,
+            aba_config,
+        ) = abas
 
         with aba_cronometro:
             self._render_aba_cronometro(divisoes)
@@ -474,6 +543,9 @@ class App:
 
         with aba_registros:
             self._render_aba_registros(objetivos, divisoes)
+
+        with aba_estatisticas:
+            self._render_aba_estatisticas(objetivos, divisoes)
 
         with aba_config:
             self._render_aba_configuracoes(divisoes)
