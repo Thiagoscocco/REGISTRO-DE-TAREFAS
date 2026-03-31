@@ -12,14 +12,30 @@ class RepositorioDados:
     def _conectar(self):
         conn = sqlite3.connect(self._caminho_db)
         conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys = ON")
         return conn
+
+    def _coluna_existe(self, conn, tabela, coluna):
+        cur = conn.execute(f"PRAGMA table_info({tabela})")
+        colunas = [row["name"] for row in cur.fetchall()]
+        return coluna in colunas
 
     def _inicializar(self):
         with self._conectar() as conn:
             conn.execute(
                 """
+                CREATE TABLE IF NOT EXISTS objetivos (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    nome TEXT NOT NULL UNIQUE,
+                    criado_em TEXT NOT NULL
+                )
+                """
+            )
+            conn.execute(
+                """
                 CREATE TABLE IF NOT EXISTS divisoes (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    objetivo_id INTEGER,
                     nome TEXT NOT NULL UNIQUE,
                     criado_em TEXT NOT NULL
                 )
@@ -40,18 +56,100 @@ class RepositorioDados:
                 )
                 """
             )
+
+            if not self._coluna_existe(conn, "divisoes", "objetivo_id"):
+                conn.execute("ALTER TABLE divisoes ADD COLUMN objetivo_id INTEGER")
+
+            self._migrar_divisoes_sem_objetivo(conn)
             conn.commit()
 
-    def criar_divisao(self, nome):
+    def _migrar_divisoes_sem_objetivo(self, conn):
+        cur = conn.execute(
+            "SELECT COUNT(*) AS total FROM divisoes WHERE objetivo_id IS NULL"
+        )
+        total_sem_objetivo = cur.fetchone()["total"]
+        if total_sem_objetivo == 0:
+            return
+
+        agora = datetime.now().isoformat(timespec="seconds")
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO objetivos (nome, criado_em)
+            VALUES ('Objetivo migrado', ?)
+            """,
+            (agora,),
+        )
+        objetivo_id = conn.execute(
+            "SELECT id FROM objetivos WHERE nome = 'Objetivo migrado'"
+        ).fetchone()["id"]
+        conn.execute(
+            "UPDATE divisoes SET objetivo_id = ? WHERE objetivo_id IS NULL",
+            (objetivo_id,),
+        )
+
+    def criar_objetivo(self, nome):
+        nome = (nome or "").strip()
+        if not nome:
+            raise ValueError("Nome do objetivo nao pode ser vazio.")
+        agora = datetime.now().isoformat(timespec="seconds")
+        with self._conectar() as conn:
+            conn.execute(
+                "INSERT INTO objetivos (nome, criado_em) VALUES (?, ?)",
+                (nome, agora),
+            )
+            conn.commit()
+
+    def listar_objetivos(self):
+        with self._conectar() as conn:
+            cur = conn.execute(
+                """
+                SELECT
+                    o.id,
+                    o.nome,
+                    COALESCE(SUM(t.duracao_segundos), 0) AS total_segundos,
+                    COUNT(DISTINCT d.id) AS total_divisoes,
+                    COUNT(t.id) AS total_tarefas
+                FROM objetivos o
+                LEFT JOIN divisoes d ON d.objetivo_id = o.id
+                LEFT JOIN tarefas t ON t.divisao_id = d.id
+                GROUP BY o.id, o.nome
+                ORDER BY o.nome COLLATE NOCASE ASC
+                """
+            )
+            return [dict(row) for row in cur.fetchall()]
+
+    def remover_objetivo(self, objetivo_id):
+        with self._conectar() as conn:
+            divisoes = conn.execute(
+                "SELECT id FROM divisoes WHERE objetivo_id = ?",
+                (int(objetivo_id),),
+            ).fetchall()
+            ids_divisoes = [row["id"] for row in divisoes]
+            if ids_divisoes:
+                placeholders = ",".join(["?"] * len(ids_divisoes))
+                conn.execute(
+                    f"DELETE FROM tarefas WHERE divisao_id IN ({placeholders})",
+                    ids_divisoes,
+                )
+                conn.execute(
+                    f"DELETE FROM divisoes WHERE id IN ({placeholders})",
+                    ids_divisoes,
+                )
+            conn.execute("DELETE FROM objetivos WHERE id = ?", (int(objetivo_id),))
+            conn.commit()
+
+    def criar_divisao(self, objetivo_id, nome):
         nome = (nome or "").strip()
         if not nome:
             raise ValueError("Nome da divisao nao pode ser vazio.")
+        if objetivo_id is None:
+            raise ValueError("Selecione um objetivo.")
 
         agora = datetime.now().isoformat(timespec="seconds")
         with self._conectar() as conn:
             conn.execute(
-                "INSERT INTO divisoes (nome, criado_em) VALUES (?, ?)",
-                (nome, agora),
+                "INSERT INTO divisoes (objetivo_id, nome, criado_em) VALUES (?, ?, ?)",
+                (int(objetivo_id), nome, agora),
             )
             conn.commit()
 
@@ -62,12 +160,15 @@ class RepositorioDados:
                 SELECT
                     d.id,
                     d.nome,
+                    d.objetivo_id,
+                    o.nome AS objetivo_nome,
                     COALESCE(SUM(t.duracao_segundos), 0) AS total_segundos,
                     COUNT(t.id) AS total_tarefas
                 FROM divisoes d
+                LEFT JOIN objetivos o ON o.id = d.objetivo_id
                 LEFT JOIN tarefas t ON t.divisao_id = d.id
-                GROUP BY d.id, d.nome
-                ORDER BY d.nome COLLATE NOCASE ASC
+                GROUP BY d.id, d.nome, d.objetivo_id, o.nome
+                ORDER BY o.nome COLLATE NOCASE ASC, d.nome COLLATE NOCASE ASC
                 """
             )
             return [dict(row) for row in cur.fetchall()]
@@ -137,6 +238,7 @@ class RepositorioDados:
         with self._conectar() as conn:
             conn.execute("DELETE FROM tarefas")
             conn.execute("DELETE FROM divisoes")
+            conn.execute("DELETE FROM objetivos")
             conn.commit()
 
     @staticmethod

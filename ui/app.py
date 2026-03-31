@@ -71,6 +71,10 @@ class App:
         st.session_state.tarefa_ativa_divisao_id = None
         st.session_state.input_titulo_tarefa = ""
 
+    def _label_divisao(self, divisao):
+        objetivo = divisao["objetivo_nome"] or "Sem objetivo"
+        return f"{objetivo} / {divisao['nome']}"
+
     def _divisao_por_id(self, divisoes, divisao_id):
         for divisao in divisoes:
             if divisao["id"] == divisao_id:
@@ -153,18 +157,18 @@ class App:
             return
 
         opcoes_divisao = [d["id"] for d in divisoes]
-        mapa_nomes = {d["id"]: d["nome"] for d in divisoes}
+        mapa_divisoes = {d["id"]: self._label_divisao(d) for d in divisoes}
         divisao_ativa_id = st.session_state.tarefa_ativa_divisao_id
         tarefa_ativa = st.session_state.tarefa_ativa_titulo is not None
 
-        default_id = divisao_ativa_id if divisao_ativa_id in mapa_nomes else opcoes_divisao[0]
+        default_id = divisao_ativa_id if divisao_ativa_id in mapa_divisoes else opcoes_divisao[0]
         indice_padrao = opcoes_divisao.index(default_id)
 
         divisao_selecionada = st.selectbox(
             "Divisao de trabalho",
             options=opcoes_divisao,
             index=indice_padrao,
-            format_func=lambda item: mapa_nomes[item],
+            format_func=lambda item: mapa_divisoes[item],
             disabled=tarefa_ativa,
         )
 
@@ -172,11 +176,11 @@ class App:
             "Titulo da tarefa",
             key="input_titulo_tarefa",
             disabled=tarefa_ativa,
-            placeholder="Ex: Estudo de classes em Python",
+            placeholder="Ex: Aula 05 - classes em Python",
         )
 
         if tarefa_ativa:
-            nome_divisao = mapa_nomes.get(divisao_ativa_id, "Divisao removida")
+            nome_divisao = mapa_divisoes.get(divisao_ativa_id, "Divisao removida")
             st.caption(
                 f"Tarefa ativa: {st.session_state.tarefa_ativa_titulo} "
                 f"(Divisao: {nome_divisao})"
@@ -219,21 +223,69 @@ class App:
             use_container_width=True,
         )
 
-    def _render_aba_divisoes(self, divisoes):
-        st.subheader("Divisoes de Trabalho")
+    def _render_aba_objetivos(self, objetivos, divisoes):
+        st.subheader("Objetivos")
 
-        with st.form("form_criar_divisao", clear_on_submit=True):
-            nome_divisao = st.text_input("Nova divisao")
-            enviado = st.form_submit_button("Criar divisao")
+        with st.form("form_criar_objetivo", clear_on_submit=True):
+            nome_objetivo = st.text_input("Novo objetivo")
+            enviado = st.form_submit_button("Criar objetivo")
             if enviado:
                 try:
-                    self.repo.criar_divisao(nome_divisao)
-                    st.success("Divisao criada.")
+                    self.repo.criar_objetivo(nome_objetivo)
+                    st.success("Objetivo criado.")
                     st.rerun()
                 except ValueError as exc:
                     st.error(str(exc))
                 except Exception:
-                    st.error("Nao foi possivel criar a divisao. Nome pode ja existir.")
+                    st.error("Nao foi possivel criar o objetivo. Nome pode ja existir.")
+
+        if not objetivos:
+            st.info("Nenhum objetivo criado ainda.")
+            return
+
+        for objetivo in objetivos:
+            c1, c2, c3 = st.columns([6, 2, 2])
+            c1.write(
+                f"{objetivo['nome']} | Divisoes: {objetivo['total_divisoes']} | "
+                f"Tarefas: {objetivo['total_tarefas']}"
+            )
+            c2.write(f"Total: {formatar_tempo(objetivo['total_segundos'])}")
+            if c3.button("Apagar", key=f"apagar_objetivo_{objetivo['id']}"):
+                divisoes_objetivo = [
+                    d["id"] for d in divisoes if d["objetivo_id"] == objetivo["id"]
+                ]
+                if st.session_state.tarefa_ativa_divisao_id in divisoes_objetivo:
+                    self.cronometro.resetar()
+                    self._limpar_tarefa_ativa()
+                self.repo.remover_objetivo(objetivo["id"])
+                st.rerun()
+
+    def _render_aba_divisoes(self, objetivos, divisoes):
+        st.subheader("Divisoes de Trabalho")
+
+        if not objetivos:
+            st.info("Crie um objetivo primeiro para conseguir criar divisoes.")
+        else:
+            opcoes_objetivo = [o["id"] for o in objetivos]
+            mapa_objetivo = {o["id"]: o["nome"] for o in objetivos}
+
+            with st.form("form_criar_divisao", clear_on_submit=True):
+                objetivo_id = st.selectbox(
+                    "Objetivo",
+                    options=opcoes_objetivo,
+                    format_func=lambda item: mapa_objetivo[item],
+                )
+                nome_divisao = st.text_input("Nova divisao")
+                enviado = st.form_submit_button("Criar divisao")
+                if enviado:
+                    try:
+                        self.repo.criar_divisao(objetivo_id, nome_divisao)
+                        st.success("Divisao criada.")
+                        st.rerun()
+                    except ValueError as exc:
+                        st.error(str(exc))
+                    except Exception:
+                        st.error("Nao foi possivel criar a divisao. Nome pode ja existir.")
 
         if not divisoes:
             st.info("Nenhuma divisao criada ainda.")
@@ -247,8 +299,9 @@ class App:
 
         for divisao in divisoes:
             cabecalho = (
-                f"{divisao['nome']} | Total: {formatar_tempo(divisao['total_segundos'])} "
-                f"| Tarefas: {divisao['total_tarefas']}"
+                f"{self._label_divisao(divisao)} | "
+                f"Total: {formatar_tempo(divisao['total_segundos'])} | "
+                f"Tarefas: {divisao['total_tarefas']}"
             )
             with st.expander(cabecalho, expanded=False):
                 tarefas = self.repo.listar_tarefas_da_divisao(divisao["id"])
@@ -265,6 +318,74 @@ class App:
                         self.repo.remover_tarefa(tarefa["id"])
                         st.rerun()
 
+    def _resumo_periodos_tarefas(self, tarefas):
+        hoje = date.today()
+        inicio_semana = hoje - timedelta(days=hoje.weekday())
+
+        total = 0.0
+        semana = 0.0
+        hoje_total = 0.0
+
+        for tarefa in tarefas:
+            duracao = float(tarefa["duracao_segundos"] or 0.0)
+            total += duracao
+
+            data_ref = tarefa["fim_em"] or tarefa["criado_em"]
+            try:
+                dt_ref = datetime.fromisoformat(data_ref)
+            except ValueError:
+                continue
+
+            data_ref_dia = dt_ref.date()
+            if inicio_semana <= data_ref_dia <= hoje:
+                semana += duracao
+            if data_ref_dia == hoje:
+                hoje_total += duracao
+
+        return total, semana, hoje_total
+
+    def _resumo_periodos_divisao(self, divisao_id):
+        tarefas = self.repo.listar_tarefas_da_divisao(divisao_id)
+        return self._resumo_periodos_tarefas(tarefas)
+
+    def _resumo_periodos_objetivo(self, objetivo_id, divisoes):
+        tarefas_total = []
+        for divisao in divisoes:
+            if divisao["objetivo_id"] == objetivo_id:
+                tarefas_total.extend(self.repo.listar_tarefas_da_divisao(divisao["id"]))
+        return self._resumo_periodos_tarefas(tarefas_total)
+
+    def _render_aba_registros(self, objetivos, divisoes):
+        st.subheader("Registros")
+
+        st.markdown("### Objetivos")
+        if not objetivos:
+            st.info("Nenhum objetivo criado ainda.")
+        else:
+            for objetivo in objetivos:
+                total, semana, hoje_total = self._resumo_periodos_objetivo(
+                    objetivo["id"], divisoes
+                )
+                st.markdown(f"#### {objetivo['nome']}")
+                col1, col2, col3 = st.columns(3)
+                col1.metric("Horas Totais", formatar_tempo(total))
+                col2.metric("Horas na semana", formatar_tempo(semana))
+                col3.metric("Horas hoje", formatar_tempo(hoje_total))
+
+        st.divider()
+        st.markdown("### Divisoes de Trabalho")
+        if not divisoes:
+            st.info("Nenhuma divisao criada ainda.")
+            return
+
+        for divisao in divisoes:
+            total, semana, hoje_total = self._resumo_periodos_divisao(divisao["id"])
+            st.markdown(f"#### {self._label_divisao(divisao)}")
+            col1, col2, col3 = st.columns(3)
+            col1.metric("Horas Totais", formatar_tempo(total))
+            col2.metric("Horas na semana", formatar_tempo(semana))
+            col3.metric("Horas hoje", formatar_tempo(hoje_total))
+
     def _render_aba_configuracoes(self, divisoes):
         st.subheader("Configuracoes")
         st.markdown("### Adicionar tarefa manualmente")
@@ -273,13 +394,13 @@ class App:
             st.info("Crie uma divisao de trabalho antes de adicionar tarefas.")
         else:
             opcoes_divisao = [d["id"] for d in divisoes]
-            mapa_nomes = {d["id"]: d["nome"] for d in divisoes}
+            mapa_divisoes = {d["id"]: self._label_divisao(d) for d in divisoes}
 
             with st.form("form_tarefa_manual", clear_on_submit=True):
                 divisao_manual = st.selectbox(
                     "Divisao",
                     options=opcoes_divisao,
-                    format_func=lambda item: mapa_nomes[item],
+                    format_func=lambda item: mapa_divisoes[item],
                 )
                 titulo_manual = st.text_input("Titulo da tarefa")
                 duracao_manual = st.text_input(
@@ -313,7 +434,7 @@ class App:
 
         st.markdown("### Reset geral")
         st.caption(
-            "Isso apaga todas as divisoes e todas as tarefas salvas de forma permanente."
+            "Isso apaga todos os objetivos, todas as divisoes e todas as tarefas salvas."
         )
         confirmar_reset = st.checkbox("Confirmo que quero apagar tudo")
         if st.button("Apagar todos os dados", type="primary", use_container_width=True):
@@ -326,64 +447,33 @@ class App:
             st.success("Todos os dados foram apagados.")
             st.rerun()
 
-    def _resumo_periodos_divisao(self, divisao_id):
-        tarefas = self.repo.listar_tarefas_da_divisao(divisao_id)
-        hoje = date.today()
-        inicio_semana = hoje - timedelta(days=hoje.weekday())
-
-        total = 0.0
-        semana = 0.0
-        hoje_total = 0.0
-
-        for tarefa in tarefas:
-            duracao = float(tarefa["duracao_segundos"] or 0.0)
-            total += duracao
-
-            data_ref = tarefa["fim_em"] or tarefa["criado_em"]
-            try:
-                dt_ref = datetime.fromisoformat(data_ref)
-            except ValueError:
-                continue
-
-            data_ref_dia = dt_ref.date()
-            if inicio_semana <= data_ref_dia <= hoje:
-                semana += duracao
-            if data_ref_dia == hoje:
-                hoje_total += duracao
-
-        return total, semana, hoje_total
-
-    def _render_aba_registros(self, divisoes):
-        st.subheader("Registros")
-
-        if not divisoes:
-            st.info("Nenhuma divisao criada ainda.")
-            return
-
-        for divisao in divisoes:
-            total, semana, hoje_total = self._resumo_periodos_divisao(divisao["id"])
-            st.markdown(f"### {divisao['nome']}")
-            col1, col2, col3 = st.columns(3)
-            col1.metric("Horas Totais", formatar_tempo(total))
-            col2.metric("Horas na semana", formatar_tempo(semana))
-            col3.metric("Horas hoje", formatar_tempo(hoje_total))
-
     def executar(self):
         st.title("Gestao de Tempo")
+        objetivos = self.repo.listar_objetivos()
         divisoes = self.repo.listar_divisoes()
 
-        aba_cronometro, aba_divisoes, aba_registros, aba_config = st.tabs(
-            ["Cronometro", "Divisoes de Trabalho", "Registros", "Configuracoes"]
+        abas = st.tabs(
+            [
+                "Cronometro",
+                "Objetivos",
+                "Divisoes de Trabalho",
+                "Registros",
+                "Configuracoes",
+            ]
         )
+        aba_cronometro, aba_objetivos, aba_divisoes, aba_registros, aba_config = abas
 
         with aba_cronometro:
             self._render_aba_cronometro(divisoes)
 
+        with aba_objetivos:
+            self._render_aba_objetivos(objetivos, divisoes)
+
         with aba_divisoes:
-            self._render_aba_divisoes(divisoes)
+            self._render_aba_divisoes(objetivos, divisoes)
 
         with aba_registros:
-            self._render_aba_registros(divisoes)
+            self._render_aba_registros(objetivos, divisoes)
 
         with aba_config:
             self._render_aba_configuracoes(divisoes)
