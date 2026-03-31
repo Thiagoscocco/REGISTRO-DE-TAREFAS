@@ -89,7 +89,7 @@ class App:
         with aba_prev:
             self._render_aba_previsoes(alvo_checkpoints)
 
-        st.caption("dev Thiagoscocco 2026")
+        st.caption("dev Thiagoscocco 2024")
 
         if self.cronometro.rodando():
             time.sleep(0.2)
