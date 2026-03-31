@@ -81,7 +81,7 @@ class App:
     def executar(self):
         alvo_checkpoints = self._alvo_checkpoints()
 
-        st.title("Cronometro de Atividades")
+        st.title("Cronometro de Atividades (Pênis)")
         aba_crono, aba_prev = st.tabs(["Cronometro", "Previsoes"])
 
         with aba_crono:
