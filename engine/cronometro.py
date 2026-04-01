@@ -50,6 +50,27 @@ class Cronometro:
             return self._acumulado + (time.perf_counter() - self._inicio)
         return self._acumulado
 
+    def remover_tempo(self, segundos):
+        try:
+            segundos = float(segundos)
+        except (TypeError, ValueError):
+            return 0.0
+
+        if segundos <= 0:
+            return 0.0
+
+        total_atual = self.tempo_total()
+        novo_total = max(0.0, total_atual - segundos)
+        removido = total_atual - novo_total
+
+        if self._rodando:
+            self._acumulado = novo_total
+            self._inicio = time.perf_counter()
+        else:
+            self._acumulado = novo_total
+
+        return removido
+
     def finalizar(self):
         total = self.tempo_total()
         self.resetar()
