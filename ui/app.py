@@ -1,5 +1,6 @@
 ﻿import time
 from datetime import datetime, timedelta
+from pathlib import Path
 
 import streamlit as st
 
@@ -332,9 +333,17 @@ class App:
 
     def executar(self):
         st.session_state._objetivos_tab_renderizado = False
-        st.title("GEST\u00c3O DE TAREFAS")
-        st.caption(self._saudacao_thiago())
-        st.caption(self._data_humana_ptbr())
+        top_left, top_right = st.columns([3.2, 1.2], gap="small")
+        with top_left:
+            st.title("GEST\u00c3O DE TAREFAS")
+            st.caption(self._saudacao_thiago())
+            st.caption(self._data_humana_ptbr())
+
+        with top_right:
+            caminho_logo = Path(__file__).resolve().parent.parent / "logo.png"
+            if caminho_logo.exists():
+                st.markdown("<div style='height:8px;'></div>", unsafe_allow_html=True)
+                st.image(str(caminho_logo), use_container_width=True)
         st.markdown(
             """
             <style>
@@ -435,4 +444,3 @@ class App:
         if self.cronometro.rodando():
             time.sleep(0.2)
             st.rerun()
-
