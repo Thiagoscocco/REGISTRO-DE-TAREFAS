@@ -69,6 +69,13 @@ class App:
                 return divisao
         return None
 
+    @staticmethod
+    def _divisao_vinculada_ao_objetivo(divisao, objetivo_id):
+        objetivos_ids = divisao.get("objetivo_ids")
+        if objetivos_ids:
+            return int(objetivo_id) in [int(item) for item in objetivos_ids]
+        return divisao.get("objetivo_id") == objetivo_id
+
     def _iniciar_tarefa(self, divisao_id, titulo):
         if divisao_id is None:
             st.warning("Selecione uma divisao de trabalho.")
@@ -265,7 +272,7 @@ class App:
     def _resumo_periodos_objetivo(self, objetivo_id, divisoes):
         tarefas_total = []
         for divisao in divisoes:
-            if divisao["objetivo_id"] == objetivo_id:
+            if self._divisao_vinculada_ao_objetivo(divisao, objetivo_id):
                 tarefas_total.extend(self.repo.listar_tarefas_da_divisao(divisao["id"]))
         return resumo_periodos_tarefas(tarefas_total)
 

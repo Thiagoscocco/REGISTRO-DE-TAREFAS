@@ -96,15 +96,16 @@ def render_divisoes_tab(
         else:
             opcoes_objetivo = [o["id"] for o in objetivos]
             mapa_objetivo = {o["id"]: o["nome"] for o in objetivos}
-            objetivo_id = st.selectbox(
-                "Objetivo",
+            objetivos_ids = st.multiselect(
+                "Objetivos (ate 2)",
                 options=opcoes_objetivo,
                 format_func=lambda item: mapa_objetivo[item],
-                key="nova_divisao_objetivo_id",
+                key="nova_divisao_objetivos_ids",
+                max_selections=2,
             )
             nome_divisao = st.text_input("Nome da divisao", key="nova_divisao_nome")
             if st.button("Salvar divisao", key="salvar_nova_divisao"):
-                on_criar_divisao(objetivo_id, nome_divisao)
+                on_criar_divisao(objetivos_ids, nome_divisao)
 
     if not divisoes:
         st.info("Nenhuma divisao criada ainda.")

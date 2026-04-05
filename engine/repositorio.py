@@ -75,6 +75,17 @@ class RepositorioDados:
             )
             conn.execute(
                 """
+                CREATE TABLE IF NOT EXISTS divisao_objetivos (
+                    divisao_id INTEGER NOT NULL,
+                    objetivo_id INTEGER NOT NULL,
+                    PRIMARY KEY (divisao_id, objetivo_id),
+                    FOREIGN KEY(divisao_id) REFERENCES divisoes(id) ON DELETE CASCADE,
+                    FOREIGN KEY(objetivo_id) REFERENCES objetivos(id) ON DELETE CASCADE
+                )
+                """
+            )
+            conn.execute(
+                """
                 CREATE TABLE IF NOT EXISTS tarefas (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     divisao_id INTEGER NOT NULL,
@@ -108,6 +119,7 @@ class RepositorioDados:
                 )
 
             self._migrar_divisoes_sem_objetivo(conn)
+            self._migrar_vinculos_divisao_objetivos(conn)
             self._migrar_cores_objetivos(conn)
             conn.commit()
 
@@ -135,6 +147,16 @@ class RepositorioDados:
             (objetivo_id,),
         )
 
+    def _migrar_vinculos_divisao_objetivos(self, conn):
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO divisao_objetivos (divisao_id, objetivo_id)
+            SELECT id, objetivo_id
+            FROM divisoes
+            WHERE objetivo_id IS NOT NULL
+            """
+        )
+
     def _proxima_cor_disponivel(self, cores_em_uso):
         for cor in self._PALETA_OBJETIVOS:
             if cor not in cores_em_uso:
@@ -159,6 +181,33 @@ class RepositorioDados:
                 cor = self._proxima_cor_disponivel(cores_em_uso)
                 conn.execute("UPDATE objetivos SET cor = ? WHERE id = ?", (cor, row["id"]))
             cores_em_uso.add(cor)
+
+    @staticmethod
+    def _normalizar_objetivos_vinculados(objetivos):
+        if isinstance(objetivos, (list, tuple, set)):
+            origem = objetivos
+        elif objetivos is None:
+            origem = []
+        else:
+            origem = [objetivos]
+
+        ids = []
+        vistos = set()
+        for item in origem:
+            try:
+                objetivo_id = int(item)
+            except (TypeError, ValueError):
+                continue
+            if objetivo_id in vistos:
+                continue
+            vistos.add(objetivo_id)
+            ids.append(objetivo_id)
+
+        if not ids:
+            raise ValueError("Selecione ao menos um objetivo.")
+        if len(ids) > 2:
+            raise ValueError("Selecione no maximo dois objetivos por divisao.")
+        return ids
 
     def criar_objetivo(self, nome, origem="user"):
         nome = (nome or "").strip()
@@ -200,7 +249,8 @@ class RepositorioDados:
                     COUNT(DISTINCT d.id) AS total_divisoes,
                     COUNT(t.id) AS total_tarefas
                 FROM objetivos o
-                LEFT JOIN divisoes d ON d.objetivo_id = o.id
+                LEFT JOIN divisao_objetivos do ON do.objetivo_id = o.id
+                LEFT JOIN divisoes d ON d.id = do.divisao_id
                 LEFT JOIN tarefas t ON t.divisao_id = d.id
                 GROUP BY o.id, o.nome, o.cor
                 ORDER BY o.nome COLLATE NOCASE ASC
@@ -232,8 +282,7 @@ class RepositorioDados:
         nome = (nome or "").strip()
         if not nome:
             raise ValueError("Nome da divisao nao pode ser vazio.")
-        if objetivo_id is None:
-            raise ValueError("Selecione um objetivo.")
+        objetivos_ids = self._normalizar_objetivos_vinculados(objetivo_id)
 
         agora = datetime.now().isoformat(timespec="seconds")
         with self._conectar() as conn:
@@ -242,10 +291,19 @@ class RepositorioDados:
                 INSERT INTO divisoes (objetivo_id, nome, criado_em, origem)
                 VALUES (?, ?, ?, ?)
                 """,
-                (int(objetivo_id), nome, agora, origem),
+                (int(objetivos_ids[0]), nome, agora, origem),
             )
+            divisao_id = int(cur.lastrowid)
+            for obj_id in objetivos_ids:
+                conn.execute(
+                    """
+                    INSERT OR IGNORE INTO divisao_objetivos (divisao_id, objetivo_id)
+                    VALUES (?, ?)
+                    """,
+                    (divisao_id, int(obj_id)),
+                )
             conn.commit()
-            return int(cur.lastrowid)
+            return divisao_id
 
     def obter_divisao_por_nome(self, nome):
         with self._conectar() as conn:
@@ -280,7 +338,28 @@ class RepositorioDados:
                 ORDER BY ultima_atualizacao DESC, d.nome COLLATE NOCASE ASC
                 """
             )
-            return [dict(row) for row in cur.fetchall()]
+            divisoes = [dict(row) for row in cur.fetchall()]
+            if not divisoes:
+                return divisoes
+
+            cur_links = conn.execute(
+                """
+                SELECT divisao_id, objetivo_id
+                FROM divisao_objetivos
+                ORDER BY divisao_id ASC, objetivo_id ASC
+                """
+            )
+            mapa = {}
+            for row in cur_links.fetchall():
+                mapa.setdefault(int(row["divisao_id"]), []).append(int(row["objetivo_id"]))
+
+            for divisao in divisoes:
+                objetivo_principal = divisao.get("objetivo_id")
+                objetivos_ids = mapa.get(int(divisao["id"]), [])
+                if not objetivos_ids and objetivo_principal is not None:
+                    objetivos_ids = [int(objetivo_principal)]
+                divisao["objetivo_ids"] = objetivos_ids
+            return divisoes
 
     def adicionar_tarefa(
         self,

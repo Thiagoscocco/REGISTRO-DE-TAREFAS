@@ -37,6 +37,13 @@ def _cartao_objetivo(nome, cor):
     )
 
 
+def _divisao_vinculada_ao_objetivo(divisao, objetivo_id):
+    objetivos_ids = divisao.get("objetivo_ids")
+    if objetivos_ids:
+        return int(objetivo_id) in [int(item) for item in objetivos_ids]
+    return divisao.get("objetivo_id") == objetivo_id
+
+
 def render_objetivos_tab(
     objetivos,
     divisoes,
@@ -95,7 +102,9 @@ def render_objetivos_tab(
                 st.markdown("<div style='height:10px;'></div>", unsafe_allow_html=True)
                 continue
 
-            divisoes_objetivo = [d for d in divisoes if d["objetivo_id"] == objetivo_id]
+            divisoes_objetivo = [
+                d for d in divisoes if _divisao_vinculada_ao_objetivo(d, objetivo_id)
+            ]
             if not divisoes_objetivo:
                 st.caption("Sem divisoes vinculadas.")
             else:

@@ -23,8 +23,14 @@ def render_configuracoes_tab(
                 format_func=lambda item: mapa_objetivos[item],
             )
 
+            def _divisao_do_objetivo(divisao, objetivo_id):
+                objetivos_ids = divisao.get("objetivo_ids")
+                if objetivos_ids:
+                    return int(objetivo_id) in [int(item) for item in objetivos_ids]
+                return divisao.get("objetivo_id") == objetivo_id
+
             divisoes_objetivo = [
-                d for d in divisoes if d.get("objetivo_id") == objetivo_manual
+                d for d in divisoes if _divisao_do_objetivo(d, objetivo_manual)
             ]
             opcoes_divisao = [d["id"] for d in divisoes_objetivo]
             mapa_divisoes = {d["id"]: d["nome"] for d in divisoes_objetivo}

@@ -54,6 +54,15 @@ def _fechar_checkpoints():
     st.session_state.checkpoints_aberto = False
 
 
+def _divisao_pertence_objetivo(divisao, objetivo_id):
+    if objetivo_id is None:
+        return False
+    objetivos_ids = divisao.get("objetivo_ids")
+    if objetivos_ids:
+        return int(objetivo_id) in [int(item) for item in objetivos_ids]
+    return divisao.get("objetivo_id") == objetivo_id
+
+
 def render_cronometro_tab(
     objetivos,
     divisoes,
@@ -83,7 +92,9 @@ def render_cronometro_tab(
         st.session_state.cronometro_objetivo_id = None
 
     objetivo_id_atual = st.session_state.get("cronometro_objetivo_id")
-    divisoes_do_objetivo = [d for d in divisoes if d["objetivo_id"] == objetivo_id_atual]
+    divisoes_do_objetivo = [
+        d for d in divisoes if _divisao_pertence_objetivo(d, objetivo_id_atual)
+    ]
 
     divisao_ids = [d["id"] for d in divisoes_do_objetivo]
     divisao_id_salvo = st.session_state.get("cronometro_divisao_id")
@@ -223,7 +234,9 @@ def render_cronometro_tab(
         )
 
         objetivo_atual = st.session_state.get("cronometro_objetivo_id")
-        divisoes_filtradas = [d for d in divisoes if d["objetivo_id"] == objetivo_atual]
+        divisoes_filtradas = [
+            d for d in divisoes if _divisao_pertence_objetivo(d, objetivo_atual)
+        ]
         divisao_options = [d["id"] for d in divisoes_filtradas]
         mapa_filtrado = {d["id"]: d["nome"] for d in divisoes_filtradas}
 
