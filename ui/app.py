@@ -325,9 +325,9 @@ class App:
     @staticmethod
     def _saudacao_thiago():
         hora = datetime.now().hour
-        if hora < 12:
+        if hora > 5 < 12:
             return "Bom dia, Thiago"
-        if hora < 18:
+        if hora > 12 < 18:
             return "Boa tarde, Thiago"
         return "Boa noite, Thiago"
 
